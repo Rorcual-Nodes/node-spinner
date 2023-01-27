@@ -9,7 +9,7 @@ echo "██║  ██║╚██████╔╝██║  ██║╚█�
 echo "╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚══════╝"
 echo -e "\e[0m"
 
-echo -e "\e[1m\e[32mWelcome to the Kujira Node Setup Script by Rorcual. This Script is based on the work done by KjNodes (https://github.com/kj89/) and uses the RPC from Mintthemoon for the state sync.\e[0m"
+echo -e "\e[1m\e[32mWelcome to the Kujira Node Setup Script by Rorcual. This Script is based on the work done by KjNodes (https://github.com/kj89/) and uses Polkachu resources for state sync and snapshots.\e[0m"
 
 sleep 2         
                                                                                                                                                    
@@ -50,7 +50,8 @@ sudo apt update && sudo apt upgrade -y
 
 echo -e "\e[1m\e[32m2. Installing dependencies... \e[0m" && sleep 1
 # packages
-sudo apt install curl build-essential git wget jq make gcc tmux chrony -y
+sudo apt install curl build-essential git wget jq make gcc tmux chrony snapd -y
+sudo snap install lz4
 
 # install go
 ver="1.18.5"
@@ -97,7 +98,7 @@ kujirad version
 wget -qO $HOME/.kujira/config/genesis.json "https://raw.githubusercontent.com/Team-Kujira/networks/master/mainnet/kaiyo-1.json"
 
 # set peers and seeds
-SEEDS="5a70fdcf1f51bb38920f655597ce5fc90b8b88b8@136.244.29.116:41656"
+SEEDS="ade4d8bc8cbe014af6ebdf3cb7b1e9ad36f412c0@seeds.polkachu.com:11856"
 PEERS="9813378d0dceb86e57018bfdfbade9d863f6f3c8@3.38.73.119:26656,ccffabe81f2de8a81e171f93fe1209392bf9993f@65.108.234.59:26656,7878121e8fa201c836c8c0a95b6a9c7ac6e5b101@141.95.151.171:26656,0743497e30049ac8d59fee5b2ab3a49c3824b95c@198.244.200.196:26656,2efead362f0fc7b7fce0a64d05b56c5b28d5c2b4@164.92.209.72:36347,d24ee4b38c1ead082a7bcf8006617b640d3f5ab9@91.196.166.13:26656,5d0f0bc1c2d60f1d273165c5c8cefc3965c3d3c9@65.108.233.175:26656,5a70fdcf1f51bb38920f655597ce5fc90b8b88b8@136.244.29.116:41656,35af92154fdb2ac19f3f010c26cca9e5c175d054@65.108.238.61:27656,e65c2e27ea06b795a25f3ce813ed2062371705b8@213.239.212.121:13657,f6d0d3ac0c748a343368705c37cf51140a95929b@146.59.81.204:36657"
 sed -i -e "s/^seeds *=.*/seeds = \"$SEEDS\"/; s/^persistent_peers *=.*/persistent_peers = \"$PEERS\"/" $HOME/.kujira/config/config.toml
 
@@ -109,12 +110,12 @@ sed -i.bak -e "s%^address = \"tcp://0.0.0.0:1317\"%address = \"tcp://0.0.0.0:${K
 
 pruning="custom"
 echo -e "\e[1m\e[32m2. Here you will configure the pruning settings for your node, it is recommended to set your own values... \e[0m" && sleep 1
-read -p "How many blocks would you like to keep (hit enter for pruning_keep_recent = 119) :" pruning_keep_recent
-pruning_keep_recent=${pruning_keep_recent:-119}
+read -p "How many blocks would you like to keep (hit enter for pruning_keep_recent = 100) :" pruning_keep_recent
+pruning_keep_recent=${pruning_keep_recent:-100}
 read -p "How many blocks would you like to keep every (hit enter for pruning_keep_every = 0) :" pruning_keep_every
 pruning_keep_every=${pruning_keep_every:-0}
-read -p "How many blocks would you like to prune every (hit enter for pruning_interval=17) :" pruning_interval
-pruning_interval=${pruning_interval:-17}
+read -p "How many blocks would you like to prune every (hit enter for pruning_interval=10) :" pruning_interval
+pruning_interval=${pruning_interval:-10}
 
 sed -i -e "s/^pruning *=.*/pruning = \"$pruning\"/" $HOME/.kujira/config/app.toml
 sed -i -e "s/^pruning-keep-recent *=.*/pruning-keep-recent = \"$pruning_keep_recent\"/" $HOME/.kujira/config/app.toml
@@ -128,7 +129,7 @@ sed -i "s/^minimum-gas-prices *=.*/minimum-gas-prices = \"0.00119ukuji,0.00150fa
 sed -i "s/^timeout_commit *=.*/timeout_commit = \"1500ms\"/;" $HOME/.kujira/config/config.toml
 
 # config some peers
-sed -i 's/^seeds =.*/seeds = "63158c2af0d639d8105a8e6ca2c53dc243dd156f@seed.kujira.mintserve.org:31897,ade4d8bc8cbe014af6ebdf3cb7b1e9ad36f412c0@seeds.polkachu.com:18656"/' $HOME/.kujira/config/config.toml
+sed -i 's/^seeds =.*/seeds = "ea9f295fe14768c35ff05870098fbd7bf860836d@seed.kujira.mintserve.org:31897,ade4d8bc8cbe014af6ebdf3cb7b1e9ad36f412c0@seeds.polkachu.com:11856"/' $HOME/.kujira/config/config.toml
 
 # enable prometheus
 sed -i -e "s/prometheus = false/prometheus = true/" $HOME/.kujira/config/config.toml
@@ -136,24 +137,48 @@ sed -i -e "s/prometheus = false/prometheus = true/" $HOME/.kujira/config/config.
 # reset
 kujirad tendermint unsafe-reset-all --home $HOME/.kujira
 
+# SNAPSHOT
+echo -e "\e[1m\e[32m2. Downloading snapshot... \e[0m" 
+echo '================================================='&& sleep 3
+no_snapshot=false
+last_snapshot=$(curl https://polkachu.com/tendermint_snapshots/kujira | grep -o 'https://snapshots.polkachu.com/snapshots/kujira/[^"]*' | awk -F 'https://snapshots.polkachu.com/snapshots/kujira/' '{print $2}' | awk -F '--inet4-only' '{print $1}' | head -1)
+
+if [ -z "$last_snapshot" ]; then
+    echo -e "\e[1m\e[32m2. No snapshot found.. \e[0m" 
+	no_snapshot=true
+else
+	echo -e "\e[1m\e[32m2. Last snapshot: $last_snapshot \e[0m" 
+	wget -O $last_snapshot https://snapshots.polkachu.com/snapshots/kujira/$last_snapshot --inet4-only
+	rm -r ~/.kujira/wasm
+	lz4 -c -d $last_snapshot | tar -x -C $HOME/.kujira
+	rm -v $last_snapshot
+
+fi
+
+
 # STATE SYNC
-echo -e "\e[1m\e[32m2. Initiating State Sync... \e[0m" 
+echo -e "\e[1m\e[32m2. If snapshot failed, State Sync will start... \e[0m" 
 echo '================================================='&& sleep 3
 
-RPC=https://rpc-kujira.mintthemoon.xyz:443
-LATEST_HEIGHT=$(curl -s $RPC/block | jq -r .result.block.header.height)
-TRUST_HEIGHT=$((LATEST_HEIGHT - 2000))
-TRUST_HASH=$(curl -s "$RPC/block?height=$TRUST_HEIGHT" | jq -r .result.block_id.hash)
-sed -i.bak -E "s|^(enable[[:space:]]+=[[:space:]]+).*$|\1true| ; \
-s|^(rpc_servers[[:space:]]+=[[:space:]]+).*$|\1\"$RPC,$RPC\"| ; \
-s|^(trust_height[[:space:]]+=[[:space:]]+).*$|\1$TRUST_HEIGHT| ; \
-s|^(trust_hash[[:space:]]+=[[:space:]]+).*$|\1\"$TRUST_HASH\"|" "$HOME/.kujira/config/config.toml"
+if [[ $no_snapshot == "true" ]]; then
+	echo -e "\e[1m\e[32m2. No snapshot found...starting state sync... \e[0m"
+	SNAP_RPC="https://kujira-rpc.polkachu.com:443"
+	LATEST_HEIGHT=$(curl -s $SNAP_RPC/block | jq -r .result.block.header.height); \
+	BLOCK_HEIGHT=$((LATEST_HEIGHT - 2000)); \
+	TRUST_HASH=$(curl -s "$SNAP_RPC/block?height=$BLOCK_HEIGHT" | jq -r .result.block_id.hash)
 
-kujirad start --halt-height $LATEST_HEIGHT
-
-echo -e "\e[1m\e[32m2. Restoring previous config toml... \e[0m" 
-echo '================================================='&& sleep 3
-mv $HOME/.kujira/config/config.toml.bak $HOME/.kujira/config/config.toml
+	sed -i.bak -E "s|^(enable[[:space:]]+=[[:space:]]+).*$|\1true| ; \
+	s|^(rpc_servers[[:space:]]+=[[:space:]]+).*$|\1\"$SNAP_RPC,$SNAP_RPC\"| ; \
+	s|^(trust_height[[:space:]]+=[[:space:]]+).*$|\1$BLOCK_HEIGHT| ; \
+	s|^(trust_hash[[:space:]]+=[[:space:]]+).*$|\1\"$TRUST_HASH\"|" $HOME/.kujira/config/config.toml
+	kujirad start --halt-height $LATEST_HEIGHT
+	echo -e "\e[1m\e[32m2. Restoring previous config toml... \e[0m" 
+	echo '================================================='&& sleep 3
+	mv $HOME/.kujira/config/config.toml.bak $HOME/.kujira/config/config.toml
+	
+else
+	echo "Skipping..."
+fi
 
 # END OF STATE SYNC
 
